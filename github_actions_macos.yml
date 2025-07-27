@@ -1,103 +1,194 @@
-name: Build macOS App
+name: Build Native Python Package
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
+  build-native-package:
+    runs-on: ubuntu-latest  # Can use Ubuntu since we're just packaging files
     
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install system dependencies
+    - name: Create Native Python Package
       run: |
-        brew install pkg-config
+        # Create package directory
+        mkdir -p ArtworkProcessor_Native
         
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas openpyxl xlsxwriter kivy[base] py2app
+        # Copy Python script
+        cp Artwork_Processor.py ArtworkProcessor_Native/
         
-    - name: Create setup.py for py2app
-      run: |
-        cat > setup.py << 'EOF'
-        from setuptools import setup
-        import os
-        
-        APP = ['ultra_fast_processor.py']  # Your main Python file
-        DATA_FILES = []
-        OPTIONS = {
-            'argv_emulation': True,
-            'iconfile': None,  # Add .icns file path if you have an icon
-            'plist': {
-                'CFBundleName': 'Artwork Release Data Processor',
-                'CFBundleDisplayName': 'Artwork Release Data Processor',
-                'CFBundleGetInfoString': "Artwork Release Data Processor",
-                'CFBundleIdentifier': 'com.yourcompany.artworkprocessor',
-                'CFBundleVersion': '1.0.0',
-                'CFBundleShortVersionString': '1.0.0',
-                'NSHumanReadableCopyright': 'Copyright © 2025',
-                'NSHighResolutionCapable': True,
-            },
-            'packages': ['pandas', 'numpy', 'openpyxl', 'xlsxwriter', 'kivy'],
-            'includes': ['pkg_resources.py2_warn'],
-            'excludes': ['tkinter'],
-            'resources': [],
-            'optimize': 2,
-        }
-        
-        setup(
-            app=APP,
-            data_files=DATA_FILES,
-            options={'py2app': OPTIONS},
-            setup_requires=['py2app'],
-        )
+        # Create requirements.txt
+        cat > ArtworkProcessor_Native/requirements.txt << 'EOF'
+        pandas>=1.3.0
+        openpyxl>=3.0.0
+        XlsxWriter>=3.0.0
+        kivy>=2.1.0
+        numpy>=1.20.0
         EOF
-    
-    - name: Build macOS app
-      run: |
-        python setup.py py2app
         
-    - name: Create DMG (optional)
-      run: |
-        # Install create-dmg if you want a DMG installer
-        brew install create-dmg
-        create-dmg \
-          --volname "Artwork Release Data Processor" \
-          --window-pos 200 120 \
-          --window-size 600 300 \
-          --icon-size 100 \
-          --icon "Artwork Release Data Processor.app" 175 120 \
-          --hide-extension "Artwork Release Data Processor.app" \
-          --app-drop-link 425 120 \
-          "ArtworkProcessor-macOS.dmg" \
-          "dist/"
+        # Create setup and run script
+        cat > ArtworkProcessor_Native/setup_and_run.command << 'EOF'
+        #!/bin/bash
+        clear
+        echo "🎨 Artwork Release Data Processor"
+        echo "================================="
+        echo ""
+        
+        # Get script directory
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        PYTHON_SCRIPT="$SCRIPT_DIR/Artwork_Processor.py"
+        
+        echo "📍 Working directory: $SCRIPT_DIR"
+        echo ""
+        
+        # Check if Python script exists
+        if [ ! -f "$PYTHON_SCRIPT" ]; then
+            echo "❌ Artwork_Processor.py not found!"
+            echo "   Make sure this script is in the same folder as Artwork_Processor.py"
+            echo ""
+            read -p "Press Enter to exit..."
+            exit 1
+        fi
+        
+        echo "✅ Found Artwork_Processor.py"
+        
+        # Check if Python 3 is available
+        if command -v python3 &> /dev/null; then
+            PYTHON_CMD="python3"
+            echo "✅ Found Python 3: $(which python3)"
+        elif command -v python &> /dev/null; then
+            PYTHON_VERSION=$(python --version 2>&1)
+            if [[ $PYTHON_VERSION == *"Python 3"* ]]; then
+                PYTHON_CMD="python"
+                echo "✅ Found Python 3: $(which python)"
+            else
+                echo "❌ Python 3 not found!"
+                echo "   Please install Python 3 from: https://www.python.org/downloads/"
+                echo ""
+                read -p "Press Enter to exit..."
+                exit 1
+            fi
+        else
+            echo "❌ Python not found!"
+            echo "   Please install Python 3 from: https://www.python.org/downloads/"
+            echo ""
+            read -p "Press Enter to exit..."
+            exit 1
+        fi
+        
+        echo ""
+        
+        # Check if required packages are installed
+        echo "🔍 Checking dependencies..."
+        MISSING_PACKAGES=()
+        
+        for package in pandas openpyxl xlsxwriter kivy numpy; do
+            if ! $PYTHON_CMD -c "import $package" &> /dev/null; then
+                MISSING_PACKAGES+=($package)
+            fi
+        done
+        
+        if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+            echo "📦 Installing missing packages: ${MISSING_PACKAGES[*]}"
+            echo "   This may take a few minutes..."
+            echo ""
+            
+            # Try pip3 first, then pip
+            if command -v pip3 &> /dev/null; then
+                pip3 install --user "${MISSING_PACKAGES[@]}"
+            elif command -v pip &> /dev/null; then
+                pip install --user "${MISSING_PACKAGES[@]}"
+            else
+                echo "❌ pip not found! Cannot install packages."
+                echo "   Please install packages manually:"
+                echo "   pip3 install ${MISSING_PACKAGES[*]}"
+                echo ""
+                read -p "Press Enter to exit..."
+                exit 1
+            fi
+            
+            # Verify installation
+            echo ""
+            echo "🔍 Verifying installation..."
+            for package in "${MISSING_PACKAGES[@]}"; do
+                if $PYTHON_CMD -c "import $package" &> /dev/null; then
+                    echo "✅ $package installed successfully"
+                else
+                    echo "❌ $package installation failed"
+                fi
+            done
+        else
+            echo "✅ All dependencies are already installed"
+        fi
+        
+        echo ""
+        echo "🚀 Launching Artwork Release Data Processor..."
+        echo "   (This may take 10-15 seconds to start...)"
+        echo ""
+        
+        # Launch the application
+        $PYTHON_CMD "$PYTHON_SCRIPT"
+        
+        echo ""
+        echo "Application closed."
+        read -p "Press Enter to exit..."
+        EOF
+        
+        # Make script executable
+        chmod +x ArtworkProcessor_Native/setup_and_run.command
+        
+        # Create README
+        cat > ArtworkProcessor_Native/README.txt << 'EOF'
+        ARTWORK RELEASE DATA PROCESSOR - NATIVE PYTHON VERSION
+        ======================================================
+        
+        SYSTEM REQUIREMENTS:
+        - macOS 10.12 or newer
+        - Python 3.7+ (will auto-install packages if missing)
+        
+        INSTALLATION & RUNNING:
+        1. Extract this folder anywhere (Desktop recommended)
+        2. Double-click "setup_and_run.command"
+        3. If security warning appears: Right-click → "Open" → "Open"
+        4. Wait for dependencies to install (first time only)
+        5. Application will launch automatically
+        
+        FEATURES:
+        🎨 Clean blue UI design
+        📊 Dual output files (Combined + Final data)
+        ⚡ Smart caching for fast processing
+        🔍 Automatic SharePoint file scanning
+        📅 Date range filtering
+        💾 Saves to Documents/ArtworkProcessor_Output/
+        
+        TROUBLESHOOTING:
+        - If script won't run: Right-click → "Open" → "Open"
+        - If Python missing: Install from https://www.python.org/downloads/
+        - If packages fail: Open Terminal, run "pip3 install pandas openpyxl xlsxwriter kivy"
+        - If Kivy issues: This is normal, app may take 15 seconds to start
+        
+        CORPORATE ENVIRONMENTS:
+        - No admin rights required
+        - Uses standard Python installation
+        - IT-friendly and transparent
+        - Easy to troubleshoot
+        
+        NEED HELP: Contact support
+        EOF
+        
+        # Create distribution ZIP
+        zip -r ArtworkProcessor_Native.zip ArtworkProcessor_Native/
     
-    - name: Upload macOS App
-      uses: actions/upload-artifact@v3
+    - name: Upload Native Python Package
+      uses: actions/upload-artifact@v4
       with:
-        name: artwork-processor-macos
+        name: artwork-processor-native-python
         path: |
-          dist/
-          *.dmg
+          ArtworkProcessor_Native.zip
+          ArtworkProcessor_Native/
         retention-days: 30
-
-    - name: Create Release (if tag)
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          ArtworkProcessor-macOS.dmg
-          dist/Artwork Release Data Processor.app/**
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
